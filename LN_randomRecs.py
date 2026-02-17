@@ -18,14 +18,12 @@ class LNRandApp(ctk.CTk):
         self.current_link = ""
         
         # --- SIZE DEFINITIONS ---
-        self.wide_size = (400, 225)   # For NA and Matte
-        self.cover_size = (250, 350)  # For actual Book Covers
+        self.wide_size = (400, 225)
+        self.cover_size = (250, 350)
         
         try:
-            # Load wide assets
             na_pil = Image.open("NA.png")
             self.na_image = ctk.CTkImage(light_image=na_pil, size=self.wide_size)
-            
             load_pil = Image.open("matte2.jpg")
             self.load_image = ctk.CTkImage(light_image=load_pil, size=self.wide_size)
         except Exception as e:
@@ -55,12 +53,13 @@ class LNRandApp(ctk.CTk):
         self.main_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.main_frame.grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
         
-        # Initial state is wide
         self.cover_label = ctk.CTkLabel(self.main_frame, text="", image=self.na_image)
         self.cover_label.pack(pady=15)
 
-        self.res_title = ctk.CTkTextbox(self.main_frame, height=70, font=("Arial", 24, "bold"), 
-                                        fg_color="transparent", border_width=0, activate_scrollbars=False)
+        # TITLE: Added wrap="word" to prevent splitting words
+        self.res_title = ctk.CTkTextbox(self.main_frame, height=100, font=("Arial", 24, "bold"), 
+                                        fg_color="transparent", border_width=0, 
+                                        activate_scrollbars=False, wrap="word")
         self.res_title.pack(pady=5, fill="x")
         self.res_title.tag_config("center", justify='center')
         self.update_text_widget(self.res_title, "Ready to Roll?")
@@ -75,6 +74,18 @@ class LNRandApp(ctk.CTk):
         self.res_synopsis.pack(pady=10, fill="x")
         self.res_synopsis.configure(state="disabled")
 
+        # --- EVENT BINDING FOR DYNAMIC RESIZING ---
+        self.bind("<Configure>", self.on_resize)
+
+    def on_resize(self, event):
+        """Adjusts the title font size based on window width to prevent sinking."""
+        # Only trigger if the main window is resized
+        if event.widget == self:
+            new_width = event.width
+            # Calculate font size: Base 24 at 1000px, min 14, max 28
+            new_size = max(14, min(28, int(new_width / 40)))
+            self.res_title.configure(font=("Arial", new_size, "bold"))
+
     def update_text_widget(self, widget, content):
         widget.configure(state="normal")
         widget.delete("0.0", "end")
@@ -84,10 +95,8 @@ class LNRandApp(ctk.CTk):
         widget.configure(state="disabled")
 
     def clear_previous_data(self):
-        """Wipes UI and displays the wide matte2.jpg"""
         self.res_stats.configure(text="")
         self.res_author.configure(text="")
-        # Set to wide loading image
         self.cover_label.configure(image=self.load_image)
         self.update_text_widget(self.res_title, "Rolling...")
         self.update_text_widget(self.res_synopsis, "")
@@ -96,29 +105,19 @@ class LNRandApp(ctk.CTk):
         try:
             r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=7)
             soup = BeautifulSoup(r.content, "lxml")
-            
-            # 1. Targeting the featured-media div
             img_div = soup.find("div", class_="featured-media")
             img_url = None
-            
             if img_div:
                 img_tag = img_div.find("img")
                 if img_tag:
-                    # Check for Lazy Loading attributes first, fallback to src
-                    img_url = (img_tag.get("data-lazy-src") or 
-                               img_tag.get("data-src") or 
-                               img_tag.get("src"))
-
-            # 2. Count Volumes (Improved targeting)
+                    img_url = (img_tag.get("data-lazy-src") or img_tag.get("data-src") or img_tag.get("src"))
+            
             content = soup.find("div", class_="post-content clear") or soup.find("div", class_="entry-content")
             total_vols = 0
             if content:
-                # We specifically look for list items containing links
                 for ol in content.find_all("ol"):
                     for li in ol.find_all("li"):
-                        if li.find("a"): 
-                            total_vols += 1
-                            
+                        if li.find("a"): total_vols += 1
             return img_url, total_vols
         except Exception as e:
             print(f"Scrape Error: {e}")
@@ -136,8 +135,8 @@ class LNRandApp(ctk.CTk):
                     return {
                         "rating": f"{item.get('score'):.2f}/10" if item.get('score') else "N/A",
                         "status": item.get('status', "Unknown"),
-                        "synopsis": item.get('synopsis', "No description found."),
-                        "authors": " • ".join(creators)
+                        "synopsis": item.get('synopsis'), 
+                        "authors": " • ".join(creators) if creators else "Unknown"
                     }
         except: return None
 
@@ -158,19 +157,23 @@ class LNRandApp(ctk.CTk):
         
         if mal:
             self.res_author.configure(text=f"Creators: {mal['authors']}")
-            self.update_text_widget(self.res_synopsis, mal['synopsis'])
+            description = mal.get('synopsis')
+            if not description or description.strip() == "":
+                description = "Description cannot be found."
+            self.update_text_widget(self.res_synopsis, description)
+        else:
+            self.res_author.configure(text="Creators: Unknown")
+            self.update_text_widget(self.res_synopsis, "Description cannot be found.")
         
         self.update_image(img_url)
 
     def update_image(self, url):
-        """Uses vertical ratio for real covers and wide ratio for placeholders"""
         if not url:
-            self.cover_label.configure(image=self.na_image) # Reverts to Wide NA
+            self.cover_label.configure(image=self.na_image)
             return
         try:
             r = requests.get(url, timeout=5)
             img = Image.open(BytesIO(r.content))
-            # FIX: Real covers use vertical self.cover_size (250x350)
             self.cover_label.configure(image=ctk.CTkImage(light_image=img, size=self.cover_size))
         except: 
             self.cover_label.configure(image=self.na_image)
